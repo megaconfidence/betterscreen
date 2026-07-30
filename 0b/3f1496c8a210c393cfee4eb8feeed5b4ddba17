@@ -1,0 +1,37 @@
+Scripts/bundle.sh
+  s_6ec0637dcd9d6a::t_abb759b5941665 1-137
+Scripts/make-signing-cert.sh
+  s_6ec0637dcd9d6a::t_1c670f5e3a17c5 1-79
+Sources/BetterScreen/Ambient/CameraSnapshot.swift
+  s_af4bd78d359446::t_0d89087a13a232 1-214
+Sources/BetterScreen/SensorSelfTest.swift
+  s_6ec0637dcd9d6a::t_23fd4c95eac577 1-311
+Sources/BetterScreen/UI/MenuBarController.swift
+  s_6ec0637dcd9d6a::t_3b42b25c23905f 1-228
+Sources/BetterScreen/UI/SettingsView.swift
+  s_6ec0637dcd9d6a::t_5a1df94d935119 1-347
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0b3f1496c8a210c393cfee4eb8feeed5b4ddba17",
+  "prompts": {},
+  "sessions": {
+    "s_6ec0637dcd9d6a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_04cf54933ffe7TQIJsIQ5YxRja",
+        "model": "claude-opus-5"
+      },
+      "human_author": "megaconfidence <cokoghenun@gmail.com>"
+    },
+    "s_af4bd78d359446": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0526c0237ffer4TmVzkEfyV261",
+        "model": "claude-opus-5"
+      },
+      "human_author": "megaconfidence <cokoghenun@gmail.com>"
+    }
+  }
+}
