@@ -1,0 +1,9 @@
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# Generated app bundle produced by Scripts/bundle.sh
+dist/
+
+# macOS
+.DS_Store
