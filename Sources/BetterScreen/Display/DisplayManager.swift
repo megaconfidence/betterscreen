@@ -103,6 +103,7 @@ final class DisplayManager {
             } else {
                 display.prepare()
                 Log.display.info("Managing \(display.name) [\(kind.displayName)] brightness=\(display.currentBrightness)")
+                seedCurveIfNeeded(for: display)
                 rebuilt.append(display)
             }
         }
@@ -117,6 +118,34 @@ final class DisplayManager {
         displays = rebuilt
         isReconfiguring = false
         onDisplaysChanged?()
+    }
+
+    /// Anchors a newly seen display's curve to the brightness it is already set to.
+    ///
+    /// Without this the curve keeps its built-in default anchor, so the first
+    /// reading yanks the display to roughly 55% no matter what the user had chosen.
+    /// The reference light level should mean "the brightness you were already
+    /// happy with", which makes the first adjustment a no-op and lets calibration
+    /// refine from there.
+    private func seedCurveIfNeeded(for display: ManagedDisplay) {
+        let key = display.persistentKey
+        guard SettingsStore.shared.settings.displays[key] == nil else { return }
+
+        let observed = Double(display.currentBrightness)
+        guard observed >= 0 else {
+            // Unreadable brightness, so there is nothing trustworthy to anchor to.
+            // Leave the default rather than inventing a reference point.
+            Log.display.debug("\(display.name): brightness unreadable, keeping default curve anchor")
+            return
+        }
+
+        var settings = DisplaySettings()
+        settings.curve.anchorBrightness = min(max(observed, 0), 1)
+        settings.lastKnownName = display.name
+
+        SettingsStore.shared.update { $0.displays[key] = settings }
+        Log.display.info(String(format: "%@: anchoring curve at its current %.0f%%",
+                                display.name, observed * 100))
     }
 
     // MARK: - Lookup

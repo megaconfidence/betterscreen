@@ -237,18 +237,37 @@ final class BrightnessController {
     }
 
     private func applyTarget(stops: Double, immediate: Bool) {
-        guard !DisplayManager.shared.isReconfiguring else { return }
+        guard !DisplayManager.shared.isReconfiguring else {
+            Log.control.debug("Skipping target: displays are reconfiguring")
+            return
+        }
         let settings = SettingsStore.shared.settings
         stopsAtLastTarget = stops
 
-        for display in DisplayManager.shared.displays {
+        let all = DisplayManager.shared.displays
+        Log.control.debug(String(format: "Target at %.2f stops across %d display(s)",
+                                 stops, all.count))
+
+        for display in all {
             let displaySettings = settings.displays[display.persistentKey] ?? DisplaySettings()
-            guard displaySettings.isManaged else { continue }
+            guard displaySettings.isManaged else {
+                Log.control.debug("\(display.name): not managed, skipping")
+                continue
+            }
 
             let target = displaySettings.curve.brightness(atStops: stops)
             let current = Double(display.currentBrightness)
 
-            guard current < 0 || abs(target - current) >= settings.changeThreshold else { continue }
+            guard current < 0 || abs(target - current) >= settings.changeThreshold else {
+                Log.control.debug(String(
+                    format: "%@: holding at %.0f%% (target %.0f%% is within the %.0f%% threshold)",
+                    display.name, current * 100, target * 100, settings.changeThreshold * 100
+                ))
+                continue
+            }
+
+            Log.control.info(String(format: "%@: %.0f%% -> %.0f%% (%.2f stops)",
+                                    display.name, current * 100, target * 100, stops))
 
             if immediate || settings.transitionDuration <= 0 || current < 0 {
                 write(target, to: display)
@@ -303,7 +322,11 @@ final class BrightnessController {
     }
 
     private func write(_ value: Double, to display: ManagedDisplay) {
-        guard display.setBrightness(Float(value)) else { return }
+        guard display.setBrightness(Float(value)) else {
+            Log.control.error(String(format: "%@: brightness write to %.0f%% FAILED",
+                                     display.name, value * 100))
+            return
+        }
         lastWritten[display.persistentKey] = Double(display.currentBrightness)
     }
 

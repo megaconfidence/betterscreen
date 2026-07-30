@@ -147,6 +147,16 @@ final class AmbientLightSensor: NSObject {
     private static let rerangeStableWindow: TimeInterval = 0.5
     private static let rerangeStableTolerance = 0.03
 
+    /// How long the light must hold steady *before* a re-range is allowed to start.
+    ///
+    /// A re-range derives gain from `lumaAfter / lumaBefore`, which is only the gain
+    /// ratio if the scene is unchanged across the unlock/relock. Re-ranges trigger
+    /// exactly when the light is moving, so measuring mid-transition attributes the
+    /// scene change to gain and corrupts the scale permanently. Waiting for the room
+    /// to stop changing is what makes the ratio meaningful.
+    private static let preRerangeStableWindow: TimeInterval = 1.0
+    private static let preRerangeStableTolerance = 0.05
+
     /// Consecutive failed re-ranges before declaring the scene out of range and
     /// giving up until it returns on its own.
     private static let maxRerangeAttempts = 2
@@ -182,6 +192,9 @@ final class AmbientLightSensor: NSObject {
         case measuring
         /// Autoexposure temporarily re-enabled to pick a new gain.
         case reranging(lumaBefore: Double)
+        /// Rebuilding the reference from scratch after a saturated excursion left
+        /// the gain bookkeeping untrustworthy.
+        case reanchoring
     }
 
     private var phase: Phase = .settling
@@ -197,9 +210,12 @@ final class AmbientLightSensor: NSObject {
     private var exposureIsLocked = false
     private var rerangeStartedAt = Date.distantPast
     private var lastRerangeEndedAt = Date.distantPast
+    private var reanchorStartedAt = Date.distantPast
 
-    /// Timestamped luminance sample used to detect that autoexposure has converged.
-    private var rerangeProbe: (at: Date, luma: Double)?
+    /// Timestamped luminance sample used to detect that luminance has stopped
+    /// moving, both while waiting for autoexposure to converge and while waiting
+    /// for the room itself to stop changing.
+    private var settleProbe: (at: Date, luma: Double)?
 
     private var rerangeFailures = 0
 
@@ -456,22 +472,27 @@ extension AmbientLightSensor: AVCaptureVideoDataOutputSampleBufferDelegate {
             // Autoexposure needs a moment to even begin reacting.
             guard elapsed >= Self.settleDuration else { return }
 
-            // Converged once luminance stops moving over a short window. A fixed
-            // delay is not enough: a large gain change takes seconds, and sampling
-            // mid-ramp yields a meaningless gain ratio.
-            if let probe = rerangeProbe, now.timeIntervalSince(probe.at) >= Self.rerangeStableWindow {
-                let drift = abs(current - probe.luma) / max(probe.luma, 1e-6)
-                if drift <= Self.rerangeStableTolerance {
-                    completeRerange(lumaBefore: lumaBefore, lumaAfter: current)
-                    return
-                }
-                rerangeProbe = (now, current)
-            } else if rerangeProbe == nil {
-                rerangeProbe = (now, current)
+            // Converged once luminance stops moving. A fixed delay is not enough: a
+            // large gain change takes seconds, and sampling mid-ramp yields a
+            // meaningless gain ratio.
+            let settled = luminanceHasSettled(current, now: now,
+                                              window: Self.rerangeStableWindow,
+                                              tolerance: Self.rerangeStableTolerance)
+            if settled || elapsed >= Self.rerangeTimeout {
+                completeRerange(lumaBefore: lumaBefore, lumaAfter: current)
             }
 
-            if elapsed >= Self.rerangeTimeout {
-                completeRerange(lumaBefore: lumaBefore, lumaAfter: current)
+        case .reanchoring:
+            guard let current = smoothedRaw else { return }
+            let elapsed = now.timeIntervalSince(reanchorStartedAt)
+            guard elapsed >= Self.settleDuration else { return }
+
+            let settled = luminanceHasSettled(current, now: now,
+                                              window: Self.rerangeStableWindow,
+                                              tolerance: Self.rerangeStableTolerance)
+            if settled || elapsed >= Self.rerangeTimeout {
+                settleProbe = nil
+                lockAndAnchor()
             }
         }
     }
@@ -492,23 +513,60 @@ extension AmbientLightSensor: AVCaptureVideoDataOutputSampleBufferDelegate {
         ))
     }
 
+    /// True once smoothed luminance has held within `tolerance` for `window`.
+    ///
+    /// Call once per frame while waiting. Resets its own reference whenever the
+    /// value moves, so a slow continuous drift never counts as settled.
+    private func luminanceHasSettled(
+        _ current: Double,
+        now: Date,
+        window: TimeInterval,
+        tolerance: Double
+    ) -> Bool {
+        guard let probe = settleProbe else {
+            settleProbe = (now, current)
+            return false
+        }
+        guard now.timeIntervalSince(probe.at) >= window else { return false }
+
+        let drift = abs(current - probe.luma) / max(probe.luma, 1e-6)
+        if drift <= tolerance { return true }
+        settleProbe = (now, current)
+        return false
+    }
+
     private func evaluate(_ frame: FrameLuma) {
         guard let raw = smoothedRaw, let target = aeTargetLuminance, target > 0 else { return }
 
         let inBand = raw <= Self.rerangeHigh && raw >= Self.rerangeLow
 
+        let now = Date()
+
         if inBand {
-            // Recovered on its own, so allow re-ranging again.
+            settleProbe = nil
+
+            // While saturated the true gain was changing unobservably: at the sensor
+            // floor both sides of the ratio read the same value, so the change was
+            // never recorded. Carrying that bookkeeping forward is what drifted
+            // gainFactor by 170x and left a normally lit room reading +7 stops. The
+            // only honest recovery is to discard the reference and build a new one.
             if isOutOfRange {
-                Log.ambient.info("Signal back within range; re-ranging re-armed")
+                beginReanchor()
+                return
             }
-            isOutOfRange = false
             rerangeFailures = 0
         } else if exposureIsLocked, !isOutOfRange,
-                  Date().timeIntervalSince(lastRerangeEndedAt) >= Self.rerangeCooldown {
-            // Re-range before the signal actually clips, not after.
-            beginRerange(lumaBefore: raw)
-            return
+                  now.timeIntervalSince(lastRerangeEndedAt) >= Self.rerangeCooldown {
+            // Re-range before the signal actually clips, not after -- but only once
+            // the light has stopped moving, so the measured ratio is gain and not
+            // the scene changing underneath it.
+            if luminanceHasSettled(raw, now: now,
+                                   window: Self.preRerangeStableWindow,
+                                   tolerance: Self.preRerangeStableTolerance) {
+                settleProbe = nil
+                beginRerange(lumaBefore: raw)
+                return
+            }
         }
         // Otherwise fall through and keep publishing. An out-of-band reading is
         // still directionally useful, and it is flagged unreliable so the control
@@ -536,8 +594,31 @@ extension AmbientLightSensor: AVCaptureVideoDataOutputSampleBufferDelegate {
     private func beginRerange(lumaBefore: Double) {
         Log.ambient.info(String(format: "Re-ranging: raw luminance %.4f left the usable band", lumaBefore))
         rerangeStartedAt = Date()
-        rerangeProbe = nil
+        settleProbe = nil
         phase = .reranging(lumaBefore: lumaBefore)
+        setExposureMode(.continuousAutoExposure)
+    }
+
+    /// Discards the reference and rebuilds it from autoexposure's own target.
+    ///
+    /// `relativeLight` deliberately jumps here. Continuity would be a lie: the gain
+    /// changes that happened while saturated were never observable, so the old scale
+    /// no longer relates to the new one. The cost is that the reference light level
+    /// shifts, so calibrations recorded before the excursion no longer describe the
+    /// same conditions.
+    private func beginReanchor() {
+        Log.ambient.info("""
+        Re-anchoring after an out-of-range excursion: gain changed unobservably while \
+        saturated, so the old reference is discarded rather than carried forward.
+        """)
+
+        isOutOfRange = false
+        rerangeFailures = 0
+        gainFactor = 1.0
+        aeTargetLuminance = nil
+        settleProbe = nil
+        reanchorStartedAt = Date()
+        phase = .reanchoring
         setExposureMode(.continuousAutoExposure)
     }
 
@@ -566,7 +647,7 @@ extension AmbientLightSensor: AVCaptureVideoDataOutputSampleBufferDelegate {
             setExposureMode(.locked)
             phase = .measuring
             lastRerangeEndedAt = Date()
-            rerangeProbe = nil
+            settleProbe = nil
         }
 
         guard lumaBefore > 0, lumaAfter > 0, let target = aeTargetLuminance else {
