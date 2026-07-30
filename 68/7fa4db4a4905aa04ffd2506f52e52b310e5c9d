@@ -1,0 +1,23 @@
+Sources/BetterScreen/Ambient/AmbientLightSensor.swift
+  s_6ec0637dcd9d6a::t_66db2d6990634e 150-159,195-197,213,215-218,475-482,485-495,516-537,543-544,546-552,554-555,559-569,597,602-624,650
+Sources/BetterScreen/Control/BrightnessController.swift
+  s_6ec0637dcd9d6a::t_b55a52c38cad2a 240-243,247-251,253-256,261-270,325-329
+Sources/BetterScreen/Display/DisplayManager.swift
+  s_6ec0637dcd9d6a::t_b11fa0757f1b5e 106,123-150
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "687fa4db4a4905aa04ffd2506f52e52b310e5c9d",
+  "prompts": {},
+  "sessions": {
+    "s_6ec0637dcd9d6a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_04cf54933ffe7TQIJsIQ5YxRja",
+        "model": "claude-opus-5"
+      },
+      "human_author": "megaconfidence <cokoghenun@gmail.com>"
+    }
+  }
+}
