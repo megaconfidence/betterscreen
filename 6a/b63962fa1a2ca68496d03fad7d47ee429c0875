@@ -1,0 +1,21 @@
+.opencode/skills/verify-brightness-loop/SKILL.md
+  s_6ec0637dcd9d6a::t_ff5f60fb47d341 1-126
+AGENTS.md
+  s_6ec0637dcd9d6a::t_39e607e84977b4 1-112
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6ab63962fa1a2ca68496d03fad7d47ee429c0875",
+  "prompts": {},
+  "sessions": {
+    "s_6ec0637dcd9d6a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_04cf54933ffe7TQIJsIQ5YxRja",
+        "model": "claude-opus-5"
+      },
+      "human_author": "megaconfidence <cokoghenun@gmail.com>"
+    }
+  }
+}
